@@ -1,0 +1,511 @@
+---
+title: "Accidentalidad Medellin Analisis Descriptivo"
+author: "Grupo TAE"
+date: "14/10/2020"
+output:
+  html_document:
+    toc: true
+    toc_depth: 5
+    theme: united
+---
+
+## Librerías utilizadas
+
+```{r}
+library(lubridate)
+library(dplyr)
+library(tidyr)
+```
+
+
+## Lectura de las bases de datos
+
+Para ejecutar este código deben tener guardados los datos en la misma carpeta o crear un proyecto y ubicar allí los datos.
+
+```{r}
+dir_2014 <- "Incidentes_georreferenciados_2014.csv"
+dir_2015 <- "Incidentes_georreferenciados_2015.csv"
+dir_2016 <- "Incidentes_georreferenciados__2016.csv"
+dir_2017 <- "Incidentes_georreferenciados_2017.csv"
+dir_2018 <- "Incidentes_georreferenciados_2018.csv"
+
+
+df_2014 <- read.csv(dir_2014, encoding = "UTF-8")
+df_2015 <- read.csv(dir_2015, encoding = "UTF-8")
+df_2016 <- read.csv(dir_2016, encoding = "UTF-8")
+df_2017 <- read.csv(dir_2017, encoding = "UTF-8")
+df_2018 <- read.csv(dir_2018, encoding = "UTF-8")
+```
+
+## Base de datos incluyendo todos los años
+
+Se incluyen los datos del 2018 para depurarlos también, en esta etapa no se utilizarán para los modelos. Cuando se escriba el archivo final, se crearán dos archivos depurados (el de los deatos de 2014 a 2017 para entrenamiendo) y el de los datos de 2018 para validación.
+
+```{r}
+df <- rbind(df_2014, df_2015, df_2016, df_2017, df_2018)
+```
+
+## Modificación de los nombres
+
+Se modifican los nombres por minúsculas. La descripción de variables y los nombres originales están disponibles en el archivo de Drive. 
+
+```{r}
+names(df) <- c("X",               # Longitud (mayor precisión)
+               "Y",               # Latitud (mayor precisión)
+               "ID",              # Identificador único
+               "radicado",
+               "fecha",
+               "hora",            # Formato de 12 horas          
+               "dia",
+               "periodo",         # Año
+               "clase",           # Tipo de accidente
+               "direccion",
+               "direccion_enc",   # Dirección codificada
+               "cblm",            
+               "tipo_geocod",     
+               "gravedad",        
+               "barrio",
+               "comuna",
+               "diseno",
+               "dia_nombre",
+               "mes",
+               "mes_nombre",
+               "X_magna",         # Longitud MAGNA MED
+               "Y_magna",         # Latitud MAGNA MED
+               "lon",             # Longitud (menor precisión)
+               "lat"             # Latitud (mayor precisión)
+               )
+
+```
+
+## fecha
+
+### Problema
+
+Veamos que el tipo de dato para fecha es carácter.
+
+```{r}
+class(df$fecha)
+```
+### Corrección
+
+Se utiliza la librería **lubridate**. 
+
+```{r}
+df$fecha <- as.Date(df$fecha, "%Y/%m/%d %H:%M:%S")
+
+class(df$fecha)                 # Verificamos si el problema se arregló
+nrow(df[is.na(df$fecha),])      # ¿Hay NA's? NO!
+```
+## dia
+
+```{r}
+nrow(df[is.na(df$dia),])      # ¿Hay NA's? NO!
+class(df$dia)                 # La clase de los días es un entero. OK!
+
+length( (df$dia == day(df$fecha))[FALSE] )     
+# Compara si los días que están en la columna día 
+# coinciden con los días obteniendolos a partir de 
+# la fecha. Se obtiene 0, por lo tanto, no hay inconsistencias
+```
+
+## periodo
+
+```{r}
+nrow(df[is.na(df$periodo),])  # ¿Hay NA's? NO!
+class(df$periodo)              # La clase de los años es un entero. OK!
+unique(df$periodo)             # Solo están los años en consideración. OK!
+
+# Comparamos para detectar posibles inconsistencias -> No hay!
+length( (df$periodo == year(df$fecha))[FALSE] )
+```
+
+## clase
+
+### problema
+
+Se observa que Caída Ocupante, Choque, entre otros están escritos de forma diferente.
+
+```{r}
+unique(df$clase)
+```
+
+### solución
+
+Se utiliza la librería dplyr y tidyr.
+
+```{r}
+# Agrupando valores repetidos pero escritos diferente en una sola categoría -----
+
+choque_rep <- c("Choque ")                                         # Nombres repetidos de Choque
+caida_ocupante_rep <-c("Caída de Ocupante", "Caida Ocupante",      # Nombres repetidos de Caída de Ocupantes
+                       "Caida de Ocupante", "Caida de Ocupante",
+                       "Caída Ocupante")
+
+df <- df %>%
+        mutate(clase = case_when(clase %in% choque_rep ~ "Choque",
+                                 clase %in% caida_ocupante_rep ~ "Caida de ocupante",
+                                 TRUE ~ as.character(clase))) %>%
+        replace_with_na(replace = list(clase = ""))               # Se reemplazan los "" por NA's
+
+
+unique(df$clase)         # Se ha corregido el problema
+
+```
+Analicemos los NA's. Veamos que tenemos 6 NA's. Dado que son pocos, se eliminarán estos datos.
+
+Se utiliza la librería tidyr
+
+```{r}
+df <- df %>% drop_na(clase)  # Se eliminan los registros con NA's en clase (6 registros)
+```
+
+## gravedad
+
+```{r}
+unique(df$gravedad)
+```
+
+Cambiaremos "SOLO DAÑOS" a "DANOS".
+
+```{r}
+df <- df %>%
+        mutate(gravedad = ifelse(gravedad == "SOLO DAÑOS",   # Test
+                                 "DANOS",                    # Test if true
+                                 gravedad)
+                                 )
+unique(df$gravedad)
+```
+## diseño
+
+```{r}
+df <- df %>% 
+        replace_with_na(replace = list(diseno = "")) # Cambiamos por "" por NA
+
+unique(df$diseno)
+
+nrow(df[is.na(df$diseno),])   # Tenemos 1284 NA's. ¿Cómo imputar estos datos? ¿Se 
+# utilizará esta variables en el modelo? ¿Descartarlos? Si los descartamos, # estaríamos botando observaciones de variables que podrían ser útiles
+          
+```
+
+## dia_nombre
+
+### problema
+
+Vemos que algunos días, como "VIERNES", está como "VIERNES    ".
+
+```{r}
+unique(df$dia_nombre)
+```
+
+### solución
+
+```{r}
+df <- df %>%
+        mutate(dia_nombre = case_when(dia_nombre == "LUNES    " ~ "Lunes",
+                                      dia_nombre == "MARTES   " ~ "Martes",
+                                      dia_nombre == "MIÉRCOLES" ~ "Miercoles",
+                                      dia_nombre == "JUEVES   " ~ "Jueves",
+                                      dia_nombre == "VIERNES  " ~ "Viernes",
+                                      dia_nombre == "SÁBADO   " ~ "Sabado",
+                                      dia_nombre == "DOMINGO  " ~ "Domingo",
+                                      TRUE ~ as.character(dia_nombre)
+                                      ))
+```
+
+## mes
+
+```{r}
+unique(df$mes)
+
+# Comparamos para detectar posibles inconsistencias -> No hay!
+length( (df$mes == month(df$fecha))[FALSE] )
+```
+## comuna
+
+```{r}
+comuna_unicos <- unique(df$comuna)
+comuna_unicos[order(comuna_unicos)]
+```
+
+## barrio
+
+```{r}
+barrio_unicos <- unique(df$barrio)
+barrio_unicos[order(barrio_unicos)]
+
+# Base de datos para agrupar barrios y comunas
+df_bar_com <- data.frame(barrio = barrio_unicos[order(barrio_unicos)][-c(1:5)])
+df_bar_com$comuna <- ""
+
+get_Comuna <- function(barrio_obs){
+  
+  n <- length(unique(df[df$barrio == barrio_obs,]$comuna))
+  comuna_1 <- unique(df[df$barrio == barrio_obs,]$comuna)
+  comuna_2 <- ifelse(n == 1, comuna_1,
+                     ifelse(n == 0, "Desconocido", "Revisar")
+                     )
+  
+  return(comuna_2)
+  
+  
+}
+
+get_Comuna <- Vectorize(get_Comuna)
+
+# Aplicando get_Comuna
+
+df_bar_com$comuna <- get_Comuna(df_bar_com$barrio)
+
+
+# BD con barrios a revisar
+
+barrios_revisar <- df_bar_com[df_bar_com$comuna == "Desconocido",]
+
+```
+
+### Ajustes a barrio - comuna
+
+```{r}
+verificar <- "La América"
+
+check <- df %>%
+          filter(comuna != verificar, barrio == verificar)
+check2 <- df %>%
+          filter(barrio == "La Esperanza")
+unique(check2$barrio)
+```
+
+```{r}
+# df[df$comuna != "Aranjuez" & df$barrio == "Aranjuez",] (donde 
+# están valores a corregir para aranjuez)
+
+
+# Datos a modificar
+lista_revisar <- c("Manrique", "Aranjuez", "Belén", "Buenos Aires", "Castilla",
+                   "El Poblado", "Guayabal", "La América", "La Candelaria",
+                   "Laureles Estadio", "Popular", "San Javier", "Santa Cruz",
+                   "Villa Hermosa", "Corregimiento de Santa Elena")
+
+for (barrio in lista_revisar){
+  
+  barrio_fix <- barrio
+  
+  data_to_change <- df[df$comuna != barrio_fix & df$barrio == barrio_fix,]
+  data_to_change$aux <- data_to_change$barrio
+  data_to_change$barrio <- data_to_change$comuna
+  data_to_change$comuna <- data_to_change$aux 
+  data_to_change <- data_to_change[,1:ncol(data_to_change)-1]
+  df[df$comuna != barrio_fix & df$barrio == barrio_fix,] <- data_to_change
+}
+
+
+
+```
+
+Aplicaremos nuevamente la función para obtener las comunas a partir de df
+
+```{r}
+df_bar_com$comuna <- get_Comuna(df_bar_com$barrio)
+```
+
+Todavía es necesario arreglar problemas con algunos barrios que están repetidos
+
+```{r}
+df_bar_com[df_bar_com$comuna == "Revisar",]
+```
+### Otros barrios a arreglar
+
+Arreglemos los barrios anteriores
+
+AUC1: Esta asociado con la dirección CL 62 CR 131, que corresponden a accidentes en el barrio Nazaret del corregimiento de San Cristobál
+
+Sin Nombre: Todos están asociados a una misma dirección, proveniente de El Pesebre (Robledo)
+
+```{r}
+df <- df %>%
+        mutate(barrio = case_when(barrio == "AUC1" ~ "Nazaret",
+                                  barrio == "Sin Nombre" ~ "El Pesebre",
+                                      TRUE ~ as.character(barrio),
+                                      ))
+
+df <- df %>%
+        mutate(comuna = case_when(barrio == "Nazaret" ~ "Corregimiento de San Cristóbal",
+                                  barrio == "El Pesebre" ~ "Robledo",
+                                  TRUE ~ as.character(comuna)))
+```
+
+### Barrios repetidos
+
+Ver anexo de Excel
+
+```{r}
+df <- df %>% 
+          mutate(barrio = case_when(barrio == "La Esperanza" & comuna == "Doce de Octubre" 
+                                    ~ "La Esperanza (Doce de Octubre)",
+                                    barrio == "La Esperanza" & comuna == "Corregimiento de Altavista" 
+                                    ~ "La Esperanza (Altavista)",
+                                    barrio == "La Florida" & comuna == "El Poblado" 
+                                    ~ "La Florida (El Poblado)",
+                                    barrio == "La Florida" & comuna == "Corregimiento de San Antonio de Prado" 
+                                    ~ "La Florida (San Antonio de Prado)",
+                                    barrio == "Las Palmas" & comuna == "La Candelaria" 
+                                    ~ "Las Palmas (La Candelaria)",
+                                    barrio == "Las Palmas" & comuna == "Corregimiento de Santa Elena" 
+                                    ~ "Las Palmas (Santa Elena)",
+                                    barrio == "Naranjal" & comuna == "Laureles Estadio" 
+                                    ~ "Naranjal (Laureles Estadio)",
+                                    barrio == "Naranjal" & comuna == "Corregimiento de San Cristóbal" 
+                                    ~ "Naranjal (San Cristóbal)",
+                                    barrio == "San Pablo" & comuna == "Popular" 
+                                    ~ "San Pablo (Popular)",
+                                    barrio == "San Pablo" & comuna == "Corregimiento de Altavista" 
+                                    ~ "San Pablo (Altavista)",
+                                    barrio == "Suburbano El Llano" & comuna == "Corregimiento de Santa Elena"
+                                    ~ "Suburbano El Llano (Santa Elena)",
+                                    barrio == "Suburbano El Llano" & comuna == "Corregimiento de San Cristóbal"
+                                    ~ "Suburbano El Llano (San Cristóbal)",
+                                    TRUE ~ as.character(barrio)
+                                    ))
+```
+
+### Chequeo de avance
+
+```{r}
+df_bar_com$comuna <- get_Comuna(df_bar_com$barrio)
+```
+
+### Barrio inst
+
+```{r}
+barrio_inst <- df[df$barrio == "Inst",]
+```
+
+"CR 57 CL 41"
+
+```{r}
+df[df$direccion == "CR 57 CL 41",]$barrio <- "La Alpujarra"
+df[df$direccion == "CR 57 CL 41",]$comuna <- "La Candelaria"
+```
+
+"CL 48 CR 70"
+
+```{r}
+df[df$direccion == "CL 48 CR 70",]$barrio <- "Suramericana"
+df[df$direccion == "CL 48 CR 70",]$comuna <- "Laureles Estadio"
+```
+
+"CL 47 D CR 70"
+
+```{r}
+df[df$direccion == "CL 47 D CR 70",]$barrio <- "Suramericana"
+df[df$direccion == "CL 47 D CR 70",]$comuna <- "Laureles Estadio"
+```
+
+"CL 5 CR 65 B"
+
+```{r}
+df[df$direccion == "CL 5 CR 65 B",]$barrio <- "Campo Amor"
+df[df$direccion == "CL 5 CR 65 B",]$comuna <- "Guayabal"
+```
+
+
+```{r}
+barrio_ins <- df[df$barrio == "Inst",]  
+
+df <- df[df$barrio != "Inst",]           # Se eliminaron 3 observaciones conflictivas
+
+```
+
+Verificación si se resolvió el problema con el barrio inst
+
+```{r}
+df_bar_com$comuna <- get_Comuna(df_bar_com$barrio)
+
+df_bar_com[df_bar_com$comuna == "Revisar",]
+```
+
+```{r}
+unique(df_bar_com$comuna)
+```
+
+### Corrección de problemas con comunas
+
+```{r}
+df <- df %>%
+        mutate(comuna = ifelse(comuna == "Cabecera San Antonio de Prado",
+                               "Corregimiento de San Antonio de Prado",
+                               as.character(comuna)))
+
+df <- df[df$comuna != "AU",]        # Se eliminaron 2 observaciones (conflicto)
+```
+
+### Otras correcciones a los barrios
+
+```{r}
+df <- df %>%
+        mutate(barrio = case_when(barrio == "Asomadera No.1" ~ "Asomadera No. 1",
+                                  barrio == "Aures No. 2" ~ "Aures No.2",
+                                  barrio == "B. Cerro  El Volador" ~ "B. Cerro El Volador",
+                                  barrio == "Barrios de Jesús" ~ "Barrio de Jesús",
+                                  barrio == "Bomboná No.1" ~ "Bomboná No. 1",
+                                  barrio == "Campo Valdés No.2" ~ "Campo Valdés No. 2",
+                                  barrio == "Manrique Central No.1" ~ "Manrique Central No. 1",
+                                  barrio == "Manrique Central No.2" ~ "Manrique Central No. 2",
+                                  barrio == "Moscú No.1" ~ "Moscú No. 1",
+                                  barrio == "Moscú No.2" ~ "Moscú No. 2",
+                                  barrio == "Nueva Villa de la Iguaná" ~ "Nueva Villa de La Iguaná",
+                                  barrio == "Santa María de los Ángeles" ~ "Santa María de Los Ángeles",
+                                  barrio == "Santo Domingo Savio No.1" ~ "Santo Domingo Savio No. 1",
+                                  barrio == "Versalles No.1" ~ "Versalles No. 1",
+                                  barrio == "Versalles No.2" ~ "Versalles No. 2",
+                                  barrio == "Villa Lilliam" ~ "Villa Liliam",
+                                  TRUE ~ as.character(barrio))
+               )
+
+df <- df %>%
+        mutate(barrio = ifelse(barrio == "9086", "", as.character(barrio)))
+```
+
+### Obtener comunas con los barrios
+
+```{r}
+# Función para obtener comunas desde un barrio (para la BD)
+# Más eficiente
+
+get_Comuna2 <- function(barrio_get){
+  if (length(df_bar_com[df_bar_com$barrio == barrio_get,]$comuna) == 1){
+    Comuna <- df_bar_com[df_bar_com$barrio == barrio_get,]$comuna
+  } else {
+    Comuna <- NA
+  }
+  
+  return(Comuna)
+}
+
+get_Comuna2 <- Vectorize(get_Comuna2)
+
+```
+
+### Barrios -> Comunas
+
+```{r}
+unique(df$comuna)
+length(unique(df$comuna))
+```
+```{r}
+df_bar_com$comuna <- get_Comuna(df_bar_com$barrio)
+df$comuna <- get_Comuna2(df$barrio)
+```
+
+```{r}
+length(unique(df$comuna))
+```
+
+# BASE DE DATOS FINAL DEPURADA (FALTA KNN)
+
+```{r}
+#write.csv(df, "Accidentalidad01.csv")
+```
+

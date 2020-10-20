@@ -1,0 +1,115 @@
+---
+title: "Ajustes finales - KNN barrios"
+author: "Grupo TAE"
+date: "14/10/2020"
+output:
+  html_document:
+    toc: true
+    toc_depth: 5
+    theme: united
+---
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(caret)
+```
+
+
+## Base datos que se depuró previamente
+
+```{r}
+path <- "Accidentalidad01.csv"
+df <- read.csv(path)
+```
+
+## Base de datos de barrios y comunas
+
+```{r}
+path2 <- "barrios_comunas.csv" 
+df_bar_com <- read.csv(path2)
+```
+
+
+## Observación de Heliconia 
+
+La coordenada (-75.70382, 6.221806) corresponde a un lugar ubicado en Heliconia. Se eliminan tales observaciones. 
+
+```{r}
+df <- df %>%
+       filter(X_magna != 820000.0)
+
+train <- df[df$barrio %in% df_bar_com$barrio,]
+test <- df[!(df$barrio %in% df_bar_com$barrio),]
+```
+
+Quedan 564 observaciones sin barrio (que no están necesariamente en Heliconia)
+
+## Función de aproximación
+
+```{r}
+get_Barrio <- function(X_0, Y_0){
+  k <- round(sqrt(564))
+
+  dist <- sqrt((train$Y - Y_0)^2 + (train$X - X_0)^2)   # Calcula distancia euclideana
+  barrios_cerc <- train[order(dist)[1:k],]$barrio       # Obtiene lista de los barrios de los k puntos más cercanos
+  
+  return(barrios_cerc[which.max(table(barrios_cerc))])          # Obtiene el valor más frecuente de barrio en elos puntos cercanos
+}
+
+get_Barrio <- Vectorize(get_Barrio)
+```
+
+## Ajustes a la df final
+
+```{r}
+test$barrio <- get_Barrio(test$X, test$Y) 
+```
+
+Se añaden los valores calculado con la función de aproximación (similar a KNN)
+
+```{r}
+df[!(df$barrio %in% df_bar_com$barrio),]$barrio <- test$barrio
+```
+
+## Función get_Comuna2
+
+```{r}
+get_Comuna2 <- function(barrio_get){
+  if (length(df_bar_com[df_bar_com$barrio == barrio_get,]$comuna) == 1){
+    Comuna <- df_bar_com[df_bar_com$barrio == barrio_get,]$comuna
+  } else {
+    Comuna <- NA
+  }
+  
+  return(Comuna)
+}
+
+get_Comuna2 <- Vectorize(get_Comuna2)
+
+```
+
+## Obteniendo comunas a partir de barrios
+
+```{r}
+df$comuna <- get_Comuna2(df$barrio)
+```
+
+## BASE DE DATOS FINAL
+
+```{r}
+df <- df[,c(-1)]       # Eliminamos columna de numeración
+```
+
+```{r}
+df <- df[,-c(3, 4, 6, 12, 13, 20, 23, 24)]
+```
+
+```{r}
+write.csv(df[df$periodo != 2018,], "Accidentalidad_Medellin.csv", row.names = FALSE)
+```
+
+```{r}
+write.csv(df[df$periodo == 2018,], "Accidentalidad_Medellin_Validacion.csv", row.names = FALSE)
+```
+
